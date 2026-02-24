@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.pytest_cache/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
+
+# Pyright
+.pyright/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Local env files
+.env
+.env.*
+secrets.yml
+
+# SQLite db files
+*.sqlite3
+
+# Docker
+*.log
+
+# macOS
+.DS_Store
+
+# Backups
+*~
