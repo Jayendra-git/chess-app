@@ -174,6 +174,65 @@ class InMemoryStore:
 
         return room
 
+    async def apply_move(self, room_id: str, session_id: str, src: str, dst: str) -> tuple:
+        """Atomically apply a move to a room's state.
+
+        Performs read-verify-modify-write under the store lock to prevent
+        concurrent handlers from corrupting the state's moves/turn.
+
+        Returns (connections_snapshot, state, move_obj) for broadcasting
+        outside the lock.
+
+        Raises KeyError if room not found. Raises ValueError for invalid
+        operations (not_in_room, spectator, not_your_turn).
+        """
+        async with self._lock:
+            room = self._rooms.get(room_id)
+            if room is None:
+                raise KeyError(room_id)
+
+            # Verify session belongs to this room
+            sess_info = self._sessions.get(session_id)
+            if not sess_info or sess_info.get("room_id") != room_id:
+                raise ValueError("not_in_room")
+
+            role = sess_info.get("role")
+            if role == "spectator":
+                raise ValueError("spectators_cannot_move")
+
+            state = room.get("state") or {}
+
+            # determine expected role from state's turn field
+            current_turn = state.get("turn")
+            if current_turn in ("w", "b"):
+                expected_role = "white" if current_turn == "w" else "black"
+            else:
+                expected_role = current_turn
+
+            if role != expected_role:
+                raise ValueError("not_your_turn")
+
+            moves = state.get("moves") or []
+            move_obj = {"from": src, "to": dst, "by": session_id}
+            moves.append(move_obj)
+            state["moves"] = moves
+
+            # flip turn
+            if expected_role == "white":
+                state["turn"] = "black"
+            else:
+                state["turn"] = "white"
+
+            # persist modified state
+            room["state"] = state
+            print(f"[STORE] apply_move: room={room_id} move={move_obj} new_turn={state.get('turn')}")
+
+            # capture snapshot of connections for broadcasting outside lock
+            conns_snapshot = list(room.get("connections") or [])
+
+        # outside lock: return snapshots for broadcasting
+        return conns_snapshot, state, move_obj
+
     async def broadcast_state(self, room_id: str, connections: list, state: dict) -> None:
         """Send the state envelope to all websocket connections in the list.
 
@@ -232,6 +291,43 @@ class InMemoryStore:
             conns = room.get("connections") or []
             room["connections"] = [c for c in conns if c not in bad]
             print(f"[STORE] broadcast_move: removed {len(bad)} dead connections from room={room_id}")
+
+    async def broadcast_move_applied(self, room_id: str, connections: list, move: dict, state: dict, result: Optional[str] = None) -> None:
+        """Broadcast a compact 'move_applied' envelope with move, new_fen, turn, result.
+
+        Mirrors the dead-connection cleanup behavior used by other broadcasters.
+        """
+        if not connections:
+            return
+
+        bad = []
+        payload = {
+            "type": "move_applied",
+            "room_id": room_id,
+            "payload": {
+                "move": move,
+                "new_fen": state.get("board_fen"),
+                "turn": state.get("turn"),
+                "result": result,
+            },
+        }
+        for ws in connections:
+            try:
+                await ws.send_json(payload)
+            except Exception as e:
+                print(f"[STORE] broadcast_move_applied: send failed for room={room_id} err={e}")
+                bad.append(ws)
+
+        if not bad:
+            return
+
+        async with self._lock:
+            room = self._rooms.get(room_id)
+            if not room:
+                return
+            conns = room.get("connections") or []
+            room["connections"] = [c for c in conns if c not in bad]
+            print(f"[STORE] broadcast_move_applied: removed {len(bad)} dead connections from room={room_id}")
 
     async def get_session(self, session_id: str) -> Optional[dict]:
         async with self._lock:

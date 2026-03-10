@@ -110,28 +110,43 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 room_id = session_info.get("room_id")
+                role = session_info.get("role")
+                # spectators may not send moves
+                if role == "spectator":
+                    await websocket.send_json({"type": "error", "message": "spectators_cannot_move", "room_id": room_id})
+                    continue
                 # retrieve room
                 room = await store.get_room(room_id)
                 if not room:
                     await websocket.send_json({"type": "error", "message": "room_not_found"})
                     continue
 
-                # append move to state's moves list (no validation yet)
-                state = room.get("state") or {}
-                moves = state.get("moves") or []
-                move_obj = {"from": src, "to": dst, "by": session_id}
-                moves.append(move_obj)
-                state["moves"] = moves
-
-                # persist state and broadcast
-                await store.update_state(room_id, state=state)
-
-                # broadcast the raw move envelope to all connections (also done by update_state->broadcast_state)
-                conns = list(room.get("connections") or [])
+                # use store.apply_move to atomically apply the move under the
+                # store lock and get snapshots for broadcasting outside the lock
                 try:
-                    await store.broadcast_move(room_id, conns, move_obj)
+                    conns_snapshot, new_state, move_obj = await store.apply_move(
+                        room_id=room_id, session_id=session_id, src=src, dst=dst
+                    )
+                except KeyError:
+                    await websocket.send_json({"type": "error", "message": "room_not_found"})
+                    continue
+                except ValueError as e:
+                    # propagate move-related errors as client-visible errors
+                    await websocket.send_json({"type": "error", "message": str(e), "room_id": room_id})
+                    continue
+
+                # broadcast updated state and the raw move envelope
+                try:
+                    await store.broadcast_state(room_id, conns_snapshot, new_state)
                 except Exception as e:
-                    print(f"[WS] broadcast_move error: {e}")
+                    print(f"[WS] broadcast_state error after apply_move: {e}")
+
+                try:
+                    # send a compact 'move_applied' envelope in addition to the
+                    # full state broadcast so clients can react to the move
+                    await store.broadcast_move_applied(room_id, conns_snapshot, move_obj, new_state, result=None)
+                except Exception as e:
+                    print(f"[WS] broadcast_move_applied error: {e}")
 
                 continue
 
