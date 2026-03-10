@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Set
+from typing import Optional, List, Set, Literal
 
 # Standard starting FEN for a chess game (includes turn, castling, en-passant, halfmove, fullmove)
 STARTING_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -17,6 +17,8 @@ class State(BaseModel):
     turn: str = Field("white")
     moves: List[str] = Field(default_factory=list)
     board_fen: str = Field(STARTING_FEN)
+    # result: None when game is ongoing, otherwise one of the outcomes
+    result: Optional[Literal["white_win", "black_win", "draw"]] = None
 
 
 class Room(BaseModel):

@@ -1,6 +1,8 @@
 from typing import Dict, Optional, Any
 import asyncio
 
+import chess
+
 from .models import Room
 
 
@@ -202,26 +204,60 @@ class InMemoryStore:
 
             state = room.get("state") or {}
 
-            # determine expected role from state's turn field
+            # determine expected role from state's turn field (uses 'white'/'black')
             current_turn = state.get("turn")
-            if current_turn in ("w", "b"):
-                expected_role = "white" if current_turn == "w" else "black"
-            else:
-                expected_role = current_turn
+            expected_role = current_turn
 
             if role != expected_role:
                 raise ValueError("not_your_turn")
 
+            # Construct a python-chess Board from current fen
+            board_fen = state.get("board_fen")
+            try:
+                board = chess.Board(board_fen)
+            except Exception as e:
+                raise ValueError(f"invalid_board_fen: {e}")
+
+            # Try parsing a direct UCI (handles non-promotion moves and
+            # promotion if the client supplied the promotion piece like e7e8q)
+            uci = f"{src}{dst}"
+            move = None
+            try:
+                candidate = chess.Move.from_uci(uci)
+                if candidate in board.legal_moves:
+                    move = candidate
+            except Exception:
+                # ignore and try matching from/to among legal moves
+                move = None
+
+            # If no direct UCI match (e.g. promotions where client didn't
+            # include the promotion piece), search legal moves for a move
+            # with matching from/to squares.
+            if move is None:
+                try:
+                    from_sq = chess.parse_square(src)
+                    to_sq = chess.parse_square(dst)
+                except Exception:
+                    raise ValueError("invalid_move_squares")
+
+                matches = [m for m in board.legal_moves if m.from_square == from_sq and m.to_square == to_sq]
+                if not matches:
+                    raise ValueError("illegal_move")
+                # if multiple matches (very rare, promotion ambiguity), pick the first
+                move = matches[0]
+
+            # Apply move
+            board.push(move)
+
+            # update moves list and state fields
             moves = state.get("moves") or []
             move_obj = {"from": src, "to": dst, "by": session_id}
             moves.append(move_obj)
             state["moves"] = moves
 
-            # flip turn
-            if expected_role == "white":
-                state["turn"] = "black"
-            else:
-                state["turn"] = "white"
+            # update board_fen and turn
+            state["board_fen"] = board.fen()
+            state["turn"] = "white" if board.turn == chess.WHITE else "black"
 
             # persist modified state
             room["state"] = state
