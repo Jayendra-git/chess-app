@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import ChessboardWrapper from './ChessboardWrapper'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
@@ -190,9 +191,19 @@ function App() {
         {roomState && (
           <div style={{ marginTop: 12, padding: 12, border: '1px solid #ddd', borderRadius: 6, background: '#fafafa' }}>
             <strong>Room State</strong>
-            <div style={{ marginTop: 8 }}>turn: {roomState.turn}</div>
-            <div>moves: {Array.isArray(roomState.moves) ? roomState.moves.length : 'n/a'}</div>
-            <div style={{ wordBreak: 'break-all' }}>board_fen: {roomState.board_fen}</div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div>turn: {roomState.turn}</div>
+                <div>moves: {Array.isArray(roomState.moves) ? roomState.moves.length : 'n/a'}</div>
+                <div style={{ wordBreak: 'break-all' }}>board_fen: {roomState.board_fen}</div>
+              </div>
+              <div style={{ width: 360 }}>
+                  {/* react-chessboard expects a FEN string via position prop */}
+                  {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
+                  {/* @ts-ignore */}
+                  <ChessboardWrapper fen={roomState.board_fen} />
+              </div>
+            </div>
             <details style={{ marginTop: 8 }}>
               <summary>Raw JSON</summary>
               <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>{JSON.stringify(roomState, null, 2)}</pre>
