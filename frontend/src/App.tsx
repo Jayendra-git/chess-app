@@ -9,6 +9,7 @@ function App() {
   const [connected, setConnected] = useState(false)
   const [roomId, setRoomId] = useState<string | null>(null)
   const [joined, setJoined] = useState(false)
+  const [currentRole, setCurrentRole] = useState<'white' | 'black' | 'spectator' | null>(null)
   const [joinRoomInput, setJoinRoomInput] = useState<string>('')
   const [joinRole, setJoinRole] = useState<'white' | 'black' | 'spectator'>('white')
   const [roomState, setRoomState] = useState<any | null>(null)
@@ -49,6 +50,7 @@ function App() {
         if (t === 'joined') {
           setRoomId(obj.room_id)
           setJoined(true)
+          setCurrentRole(obj.role)
           setMessages((m: string[]) => [...m, `Joined room ${obj.room_id} as ${obj.role}`])
           return
         }
@@ -96,6 +98,30 @@ function App() {
     } else {
       setMessages((m: string[]) => [...m, 'WebSocket not connected'])
     }
+  }
+
+  function handleBoardMove(sourceSquare: string, targetSquare: string | null) {
+    if (!targetSquare) return false
+
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setMessages((m: string[]) => [...m, 'WebSocket not connected'])
+      return false
+    }
+
+    const msg = {
+      type: 'move',
+      payload: {
+        from: sourceSquare,
+        to: targetSquare,
+      },
+    }
+
+    ws.send(JSON.stringify(msg))
+    setMessages((m: string[]) => [...m, `Sent board move: ${sourceSquare} -> ${targetSquare}`])
+
+    // Keep the board controlled by server state so rejected moves snap back cleanly.
+    return false
   }
 
   return (
@@ -198,10 +224,11 @@ function App() {
                 <div style={{ wordBreak: 'break-all' }}>board_fen: {roomState.board_fen}</div>
               </div>
               <div style={{ width: 360 }}>
-                  {/* react-chessboard expects a FEN string via position prop */}
-                  {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
-                  {/* @ts-ignore */}
-                  <ChessboardWrapper fen={roomState.board_fen} />
+                <ChessboardWrapper
+                  fen={roomState.board_fen}
+                  allowDragging={connected && joined && currentRole !== 'spectator'}
+                  onPieceDrop={({ sourceSquare, targetSquare }) => handleBoardMove(sourceSquare, targetSquare)}
+                />
               </div>
             </div>
             <details style={{ marginTop: 8 }}>

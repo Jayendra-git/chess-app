@@ -1,10 +1,22 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { ComponentType } from 'react'
+import type { ChessboardOptions } from 'react-chessboard'
 
 // This wrapper attempts to dynamically import `react-chessboard` at runtime.
 // If the module is not installed the import will fail; we catch that and
 // render a safe fallback (the raw FEN) instead of letting the app crash.
-export default function ChessboardWrapper({ fen }: { fen: string }) {
-  const [Comp, setComp] = useState<any | null>(null)
+type ChessboardWrapperProps = {
+  fen: string
+  allowDragging?: boolean
+  onPieceDrop?: ChessboardOptions['onPieceDrop']
+}
+
+export default function ChessboardWrapper({
+  fen,
+  allowDragging = true,
+  onPieceDrop,
+}: ChessboardWrapperProps) {
+  const [Comp, setComp] = useState<ComponentType<{ options?: ChessboardOptions }> | null>(null)
   const [err, setErr] = useState<any | null>(null)
 
   useEffect(() => {
@@ -12,9 +24,7 @@ export default function ChessboardWrapper({ fen }: { fen: string }) {
     import('react-chessboard')
       .then((mod) => {
         if (!mounted) return
-        // prefer default export, fall back to named export or module itself
-        const C = mod.default || mod.Chessboard || mod
-        setComp(() => C)
+        setComp(() => mod.Chessboard)
       })
       .catch((e) => {
         if (!mounted) return
@@ -39,8 +49,5 @@ export default function ChessboardWrapper({ fen }: { fen: string }) {
     return <div>Loading board...</div>
   }
 
-  // Render the dynamically loaded chessboard component. Most versions accept
-  // a `position` prop with a FEN string.
-  // @ts-ignore - dynamic import may be untyped in this repo
-  return <Comp position={fen} />
+  return <Comp options={{ position: fen, allowDragging, onPieceDrop }} />
 }
