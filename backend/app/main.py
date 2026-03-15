@@ -144,7 +144,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     # send a compact 'move_applied' envelope in addition to the
                     # full state broadcast so clients can react to the move
-                    await store.broadcast_move_applied(room_id, conns_snapshot, move_obj, new_state, result=None)
+                    await store.broadcast_move_applied(
+                        room_id,
+                        conns_snapshot,
+                        move_obj,
+                        new_state,
+                        result=new_state.get("result"),
+                    )
                 except Exception as e:
                     print(f"[WS] broadcast_move_applied error: {e}")
 

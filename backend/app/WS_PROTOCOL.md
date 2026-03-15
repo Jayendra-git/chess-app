@@ -55,3 +55,29 @@ Only these top-level fields should be relied on for routing. Additional fields m
 - Error messages may include a top-level `message` field for a short human-readable description; servers may also include a `code` field for machine handling.
 
 This document will be expanded with every new supported message type. Add new examples and payload schemas here as the protocol evolves.
+
+### Game state result
+
+- `state.payload.result` is `null` while the game is ongoing.
+- `state.payload.result` becomes:
+  - `white_win` when white delivers checkmate
+  - `black_win` when black delivers checkmate
+  - `draw` when the position is stalemate
+- Once `result` is set, the server rejects further `move` messages with `game_already_finished`.
+
+### `move_applied` message
+
+When a legal move is accepted, the server also broadcasts:
+
+```json
+{
+  "type": "move_applied",
+  "room_id": "abc123",
+  "payload": {
+    "move": { "from": "e2", "to": "e4", "by": "session-id" },
+    "new_fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+    "turn": "black",
+    "result": null
+  }
+}
+```

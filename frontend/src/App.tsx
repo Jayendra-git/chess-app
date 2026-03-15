@@ -19,8 +19,9 @@ function App() {
   useEffect(() => {
     // open websocket when component mounts
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    // connect to /ws on same host
-    const url = `${protocol}://localhost:8000/ws`
+    // connect to backend on the same LAN host the page was loaded from
+    const hostname = window.location.hostname || 'localhost'
+    const url = `${protocol}://${hostname}:8000/ws`
     const ws = new WebSocket(url)
     wsRef.current = ws
 

@@ -203,6 +203,8 @@ class InMemoryStore:
                 raise ValueError("spectators_cannot_move")
 
             state = room.get("state") or {}
+            if state.get("result") is not None:
+                raise ValueError("game_already_finished")
 
             # determine expected role from state's turn field (uses 'white'/'black')
             current_turn = state.get("turn")
@@ -258,16 +260,27 @@ class InMemoryStore:
             # update board_fen and turn
             state["board_fen"] = board.fen()
             state["turn"] = "white" if board.turn == chess.WHITE else "black"
+            state["result"] = self._get_game_result(board)
 
             # persist modified state
             room["state"] = state
-            print(f"[STORE] apply_move: room={room_id} move={move_obj} new_turn={state.get('turn')}")
+            print(
+                f"[STORE] apply_move: room={room_id} move={move_obj} "
+                f"new_turn={state.get('turn')} result={state.get('result')}"
+            )
 
             # capture snapshot of connections for broadcasting outside lock
             conns_snapshot = list(room.get("connections") or [])
 
         # outside lock: return snapshots for broadcasting
         return conns_snapshot, state, move_obj
+
+    def _get_game_result(self, board: chess.Board) -> Optional[str]:
+        if board.is_checkmate():
+            return "white_win" if board.turn == chess.BLACK else "black_win"
+        if board.is_stalemate():
+            return "draw"
+        return None
 
     async def broadcast_state(self, room_id: str, connections: list, state: dict) -> None:
         """Send the state envelope to all websocket connections in the list.
@@ -344,7 +357,7 @@ class InMemoryStore:
                 "move": move,
                 "new_fen": state.get("board_fen"),
                 "turn": state.get("turn"),
-                "result": result,
+                "result": state.get("result") if result is None else result,
             },
         }
         for ws in connections:
