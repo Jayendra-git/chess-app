@@ -1,27 +1,80 @@
 import { useEffect, useRef, useState } from 'react'
 import ChessboardWrapper from './ChessboardWrapper'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
 import './App.css'
 
+type PlayerRole = 'white' | 'black' | 'spectator'
+type Page = 'room' | 'game'
+
+function getResultCopy(result: 'white_win' | 'black_win' | 'draw' | null | undefined) {
+  switch (result) {
+    case 'white_win':
+      return {
+        title: 'White wins',
+        description: 'The game is over by checkmate.',
+      }
+    case 'black_win':
+      return {
+        title: 'Black wins',
+        description: 'The game is over by checkmate.',
+      }
+    case 'draw':
+      return {
+        title: 'Draw',
+        description: 'The game ended in a draw by stalemate.',
+      }
+    default:
+      return null
+  }
+}
+
+function getPageFromHash(): Page {
+  return window.location.hash === '#/game' ? 'game' : 'room'
+}
+
+function getWebSocketUrl(): string {
+  const configuredUrl = import.meta.env.VITE_WS_URL?.trim()
+  if (configuredUrl) {
+    return configuredUrl
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const { hostname, host } = window.location
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1'
+
+  if (isLocalHost) {
+    return `${protocol}://${hostname}:8000/ws`
+  }
+
+  return `${protocol}://${host}/ws`
+}
+
 function App() {
+  const [page, setPage] = useState<Page>(() => getPageFromHash())
   const [messages, setMessages] = useState<string[]>([])
   const [connected, setConnected] = useState(false)
   const [roomId, setRoomId] = useState<string | null>(null)
   const [joined, setJoined] = useState(false)
-  const [currentRole, setCurrentRole] = useState<'white' | 'black' | 'spectator' | null>(null)
+  const [currentRole, setCurrentRole] = useState<PlayerRole | null>(null)
   const [joinRoomInput, setJoinRoomInput] = useState<string>('')
-  const [joinRole, setJoinRole] = useState<'white' | 'black' | 'spectator'>('white')
+  const [joinRole, setJoinRole] = useState<PlayerRole>('white')
   const [roomState, setRoomState] = useState<any | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
-  const [moveInput, setMoveInput] = useState<string>('')
+  const resultCopy = getResultCopy(roomState?.result)
 
   useEffect(() => {
-    // open websocket when component mounts
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    // connect to backend on the same LAN host the page was loaded from
-    const hostname = window.location.hostname || 'localhost'
-    const url = `${protocol}://${hostname}:8000/ws`
+    const syncPageFromHash = () => setPage(getPageFromHash())
+
+    window.addEventListener('hashchange', syncPageFromHash)
+    syncPageFromHash()
+
+    return () => {
+      window.removeEventListener('hashchange', syncPageFromHash)
+    }
+  }, [])
+
+  useEffect(() => {
+    // Open websocket when component mounts.
+    const url = getWebSocketUrl()
     const ws = new WebSocket(url)
     wsRef.current = ws
 
@@ -37,6 +90,7 @@ function App() {
         if (t === 'room_created') {
           const id = obj.room_id
           setRoomId(id)
+          setJoinRoomInput(id)
           setMessages((m: string[]) => [...m, `Room created: ${id}`])
           // auto-join as white by default
           const joinMsg = { type: 'join_room', room_id: id, payload: { role: 'white' } }
@@ -50,9 +104,11 @@ function App() {
 
         if (t === 'joined') {
           setRoomId(obj.room_id)
+          setJoinRoomInput(obj.room_id)
           setJoined(true)
           setCurrentRole(obj.role)
           setMessages((m: string[]) => [...m, `Joined room ${obj.room_id} as ${obj.role}`])
+          window.location.hash = '/game'
           return
         }
 
@@ -70,7 +126,7 @@ function App() {
 
         // fall back: append raw message
         setMessages((m: string[]) => [...m, ev.data])
-      } catch (e) {
+      } catch {
         // not JSON, just append raw text
         setMessages((m: string[]) => [...m, ev.data])
       }
@@ -89,13 +145,23 @@ function App() {
     }
   }, [])
 
-
   function createRoom() {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       const msg = { type: 'create_room' }
       ws.send(JSON.stringify(msg))
       setMessages((m: string[]) => [...m, 'Sent: create_room'])
+    } else {
+      setMessages((m: string[]) => [...m, 'WebSocket not connected'])
+    }
+  }
+
+  function joinRoom() {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const msg = { type: 'join_room', room_id: joinRoomInput, payload: { role: joinRole } }
+      ws.send(JSON.stringify(msg))
+      setMessages((m: string[]) => [...m, `Sent join_room ${joinRoomInput} as ${joinRole}`])
     } else {
       setMessages((m: string[]) => [...m, 'WebSocket not connected'])
     }
@@ -126,121 +192,142 @@ function App() {
   }
 
   return (
-    <div className="App">
-      <div className="logo-row">
-        <a href="https://vite.dev" target="_blank" rel="noreferrer">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank" rel="noreferrer">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-
-  <h1>Lets play chess</h1>
-
-        <div className="card">
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={createRoom}>Create room</button>
-          {roomId && (
-            <span style={{ marginLeft: 12 }}>Room: <strong>{roomId}</strong> {joined ? '(joined)' : ''}</span>
-          )}
+    <div className="app-shell">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Realtime Chess</p>
+          <h1>Lets play chess</h1>
         </div>
-        <div style={{ marginBottom: 12, marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input
-            placeholder="room id"
-            value={joinRoomInput}
-            onChange={(e) => setJoinRoomInput(e.target.value)}
-            style={{ width: 160 }}
-          />
-          <select value={joinRole} onChange={(e) => setJoinRole(e.target.value as any)}>
-            <option value="white">white</option>
-            <option value="black">black</option>
-            <option value="spectator">spectator</option>
-          </select>
-          <button
-            onClick={() => {
-              const ws = wsRef.current
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                const msg = { type: 'join_room', room_id: joinRoomInput, payload: { role: joinRole } }
-                ws.send(JSON.stringify(msg))
-                setMessages((m: string[]) => [...m, `Sent join_room ${joinRoomInput} as ${joinRole}`])
-              } else {
-                setMessages((m: string[]) => [...m, 'WebSocket not connected'])
-              }
-            }}
-          >
-            Join
-          </button>
+        <div className="status-pill">
+          WebSocket: {connected ? 'connected' : 'disconnected'}
         </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input
-            placeholder='move JSON e.g. {"from":"e2","to":"e4"}'
-            value={moveInput}
-            onChange={(e) => setMoveInput(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <button
-            onClick={() => {
-              const ws = wsRef.current
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                // expect the user to type a JSON string exactly in the envelope format
-                try {
-                  // validate JSON
-                  JSON.parse(moveInput)
-                  ws.send(moveInput)
-                  setMessages((m: string[]) => [...m, `Sent move: ${moveInput}`])
-                  setMoveInput('')
-                } catch (e) {
-                  setMessages((m: string[]) => [...m, `Invalid JSON: ${String(e)}`])
-                }
-              } else {
-                setMessages((m: string[]) => [...m, 'WebSocket not connected'])
-              }
-            }}
-          >
-            Send Move
-          </button>
-        </div>
+      </header>
 
-        <p>WebSocket: {connected ? 'connected' : 'disconnected'}</p>
-
-        <div style={{ marginTop: 12 }}>
-          <strong>Messages</strong>
-          <div style={{ marginTop: 8 }}>
-            {messages.length === 0 && <div style={{ color: '#666' }}>No messages yet</div>}
-            {messages.map((m, i) => (
-              <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee' }}>
-                {m}
+      {page === 'room' ? (
+        <main className="page-grid room-page">
+          <section className="panel hero-panel">
+            <h2>Room</h2>
+            <p className="panel-copy">
+              Create a new room or join an existing one before jumping into the board.
+            </p>
+            <div className="action-stack">
+              <button onClick={createRoom}>Create room</button>
+              <div className="join-row">
+                <input
+                  placeholder="room id"
+                  value={joinRoomInput}
+                  onChange={(e) => setJoinRoomInput(e.target.value)}
+                />
+                <select value={joinRole} onChange={(e) => setJoinRole(e.target.value as PlayerRole)}>
+                  <option value="white">white</option>
+                  <option value="black">black</option>
+                  <option value="spectator">spectator</option>
+                </select>
+                <button onClick={joinRoom} disabled={!joinRoomInput.trim()}>
+                  Join room
+                </button>
               </div>
-            ))}
-          </div>
-        </div>
-        {roomState && (
-          <div style={{ marginTop: 12, padding: 12, border: '1px solid #ddd', borderRadius: 6, background: '#fafafa' }}>
-            <strong>Room State</strong>
-            <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div>turn: {roomState.turn}</div>
-                <div>moves: {Array.isArray(roomState.moves) ? roomState.moves.length : 'n/a'}</div>
-                <div style={{ wordBreak: 'break-all' }}>board_fen: {roomState.board_fen}</div>
+            </div>
+            {roomId && (
+              <div className="room-summary">
+                Active room: <strong>{roomId}</strong> {joined ? `(${currentRole})` : ''}
               </div>
-              <div style={{ width: 360 }}>
+            )}
+          </section>
+
+          <section className="panel">
+            <h2>Activity</h2>
+            <div className="message-list">
+              {messages.length === 0 && <div className="empty-state">No messages yet</div>}
+              {messages.map((m, i) => (
+                <div key={i} className="message-item">
+                  {m}
+                </div>
+              ))}
+            </div>
+          </section>
+        </main>
+      ) : (
+        <main className="page-grid game-page">
+          <section className="panel board-panel">
+            <div className="panel-header">
+              <div>
+                <h2>Game</h2>
+                <p className="panel-copy">
+                  Room <strong>{roomId ?? 'not joined'}</strong>
+                  {currentRole ? ` • playing as ${currentRole}` : ''}
+                </p>
+              </div>
+              <button type="button" className="secondary-button" onClick={() => { window.location.hash = '/room' }}>
+                Back to room
+              </button>
+            </div>
+
+            {resultCopy && (
+              <div className="result-banner" role="status" aria-live="polite">
+                <strong>{resultCopy.title}</strong>
+                <span>{resultCopy.description}</span>
+              </div>
+            )}
+
+            {roomState ? (
+              <div className="board-wrap">
                 <ChessboardWrapper
                   fen={roomState.board_fen}
                   allowDragging={connected && joined && currentRole !== 'spectator'}
                   onPieceDrop={({ sourceSquare, targetSquare }) => handleBoardMove(sourceSquare, targetSquare)}
                 />
               </div>
-            </div>
-            <details style={{ marginTop: 8 }}>
-              <summary>Raw JSON</summary>
-              <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto' }}>{JSON.stringify(roomState, null, 2)}</pre>
-            </details>
-          </div>
-        )}
-      </div>
+            ) : (
+              <div className="empty-board">Waiting for room state...</div>
+            )}
+          </section>
 
-      <p className="read-the-docs">Edit <code>src/App.tsx</code> to modify this demo.</p>
+          <section className="panel side-panel">
+            <h2>Match Info</h2>
+            {roomState ? (
+              <>
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <span className="stat-label">Turn</span>
+                    <strong>{roomState.result ? 'game over' : roomState.turn}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-label">Moves</span>
+                    <strong>{Array.isArray(roomState.moves) ? roomState.moves.length : 'n/a'}</strong>
+                  </div>
+                </div>
+                <div className="stat-card result-card">
+                  <span className="stat-label">Result</span>
+                  <strong>{resultCopy ? resultCopy.title : 'Game in progress'}</strong>
+                </div>
+                <div className="fen-block">
+                  <span className="stat-label">Board FEN</span>
+                  <code>{roomState.board_fen}</code>
+                </div>
+                <details className="raw-json">
+                  <summary>Raw JSON</summary>
+                  <pre>{JSON.stringify(roomState, null, 2)}</pre>
+                </details>
+              </>
+            ) : (
+              <div className="empty-state">Join a room to load the board.</div>
+            )}
+
+            <div className="message-section">
+              <h3>Activity</h3>
+              <div className="message-list compact">
+                {messages.length === 0 && <div className="empty-state">No messages yet</div>}
+                {messages.map((m, i) => (
+                  <div key={i} className="message-item">
+                    {m}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </main>
+      )}
     </div>
   )
 }
